@@ -48,7 +48,7 @@ def main(speech_file):
     Args:
         speech_file: the name of the audio file.
     """
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/wroberts/Downloads/Semantics Exam Marking-859035255c4c.json'
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials/semantics-exam-marking.json'
 
     #if speech_file.endswith('.amr'):
     #    amr_filename = speech_file
