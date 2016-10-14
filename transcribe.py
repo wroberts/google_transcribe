@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 # Copyright 2016 Google Inc. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,40 +17,30 @@
 """Google Cloud Speech API sample application using the REST API for async
 batch processing."""
 
-# [START import_libraries]
 import argparse
 import base64
 import json
 import time
 import os
-
 from googleapiclient import discovery
 import httplib2
 from oauth2client.client import GoogleCredentials
-# [END import_libraries]
 
-
-# [START authenticating]
-
-
-# Application default credentials provided by env variable
-# GOOGLE_APPLICATION_CREDENTIALS
-def get_speech_service():
+def get_authorised_http():
+    # Application default credentials provided by env variable
+    # GOOGLE_APPLICATION_CREDENTIALS
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials/semantics-exam-marking.json'
     credentials = GoogleCredentials.get_application_default().create_scoped(
         ['https://www.googleapis.com/auth/cloud-platform'])
     http = httplib2.Http()
     credentials.authorize(http)
-
-    return discovery.build('speech', 'v1beta1', http=http)
-# [END authenticating]
-
+    return http
 
 def main(speech_file):
     """Transcribe the given audio file asynchronously.
     Args:
         speech_file: the name of the audio file.
     """
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials/semantics-exam-marking.json'
 
     #if speech_file.endswith('.amr'):
     #    amr_filename = speech_file
@@ -62,7 +54,8 @@ def main(speech_file):
     #    # Base64 encode the binary audio file for inclusion in the request.
     #    speech_content = base64.b64encode(speech.read())
 
-    service = get_speech_service()
+    http = get_authorised_http()
+    service = discovery.build('speech', 'v1beta1', http=http)
     service_request = service.speech().asyncrecognize(
         body={
             'config': {
@@ -105,10 +98,10 @@ def main(speech_file):
     #print(json.dumps(response['response']['results']))
 
     #import pdb ; pdb.set_trace()
-    
+
     for x in response['response']['results']:
         print x['alternatives'][0]['transcript']
-    
+
 
 # [START run_application]
 if __name__ == '__main__':
