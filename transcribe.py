@@ -26,7 +26,9 @@ from googleapiclient import discovery
 import httplib2
 from oauth2client.client import GoogleCredentials
 
-def get_authorised_http():
+# http://unix.stackexchange.com/questions/293376/remove-silence-from-audio-files-while-leaving-gaps
+
+def get_speech_service():
     # Application default credentials provided by env variable
     # GOOGLE_APPLICATION_CREDENTIALS
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials/semantics-exam-marking.json'
@@ -34,7 +36,10 @@ def get_authorised_http():
         ['https://www.googleapis.com/auth/cloud-platform'])
     http = httplib2.Http()
     credentials.authorize(http)
-    return http
+    #return http
+    #http = get_authorised_http()
+    service = discovery.build('speech', 'v1beta1', http=http)
+    return service
 
 def main(speech_file):
     """Transcribe the given audio file asynchronously.
@@ -54,8 +59,7 @@ def main(speech_file):
     #    # Base64 encode the binary audio file for inclusion in the request.
     #    speech_content = base64.b64encode(speech.read())
 
-    http = get_authorised_http()
-    service = discovery.build('speech', 'v1beta1', http=http)
+    service = get_speech_service()
     service_request = service.speech().asyncrecognize(
         body={
             'config': {
