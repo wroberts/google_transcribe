@@ -1,0 +1,27 @@
+#+STARTUP: content hidestars odd
+
+* command line interface
+  
+  commands for:
+  - full automatic (monitor google drive folder, download, transcode,
+    push to cloud storage, transcribe, download transcription, clean
+    up cloud storage, push transcription to google drive folder)
+  - recover from error (using speech API job ID)
+
+* persistent metadata storage
+  
+  - stored in JSON locally
+  - have a concept of a transcription job
+    - to avoid duplicate work
+  - maintain state
+    - to allow automatic recovery from errors
+  - keep track of dates
+  - ideally use a human-readable format
+
+* google drive api
+
+  [[https://developers.google.com/drive/v3/web/about-sdk][Google Drive REST API Overview  |  Drive REST API  |  Google Developers]]
+  [[https://developers.google.com/drive/v3/web/manage-downloads][Download Files  |  Drive REST API  |  Google Developers]]
+  [[https://developers.google.com/drive/v3/web/about-auth][About Authorization  |  Drive REST API  |  Google Developers]]
+
+
