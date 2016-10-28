@@ -1,3 +1,10 @@
+*.fdb_latexmk
+*.fls
 *.pyc
 *~
 /credentials/
+/flowchart.pdf
+/flowchart.png
+/notes.pdf
+/notes.tex
+auto/
