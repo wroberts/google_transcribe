@@ -23,19 +23,8 @@ from oauth2client import client
 from oauth2client import tools
 from oauth2client.file import Storage
 import httplib2
-import json
 import os
 import subprocess
-
-# persistance
-def store_data(json_filename, data):
-    with open(json_filename, 'w') as output_file:
-        json_data = json.dumps(data, sort_keys=True, indent=4, ensure_ascii=False)
-        output_file.write(json_data.encode('utf-8'))
-
-def load_data(json_filename):
-    with open(json_filename, 'r') as input_file:
-        return json.loads(input_file.read().decode('utf-8'))
 
 # interpret timestamps on file objects:
 #
