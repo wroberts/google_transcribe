@@ -398,6 +398,18 @@ class DriveMonitorAction(LoopAction):
 class TranscriptionJobAction(LoopAction):
     '''Monitor the Google Drive folder and create new jobs.'''
 
+    STATES = [
+        ('uploaded', TranscriptionJobAction.download),
+        ('downloaded', TranscriptionJobAction.transcode_to_wav),
+        ('wav', TranscriptionJobAction.trim_wav),
+        ('trimmed', TranscriptionJobAction.upload_to_cloud),
+        ('stored', TranscriptionJobAction.submit_to_speech_api),
+        ('submitted', TranscriptionJobAction.poll_speech_api),
+        ('transcribed', TranscriptionJobAction.clean_cloud),
+        ('cleaned', TranscriptionJobAction.destruct),
+        ('done', None),
+    ]
+
     def __init__(self, pstorage, services, poll_loop, job_name):
         '''Constructor.'''
         super(TranscriptionJobAction, self).__init__(pstorage, services, poll_loop)
@@ -433,54 +445,43 @@ class TranscriptionJobAction(LoopAction):
 
     def tick(self):
         '''Tick method'''
-        if self.job_record['state'] == 'uploaded':
-            return self.download()
-        elif self.job_record['state'] == 'downloaded':
-            return self.transcode_to_wav()
-        elif self.job_record['state'] == 'wav':
-            return self.trim_wav()
-        elif self.job_record['state'] == 'trimmed':
-            return self.upload_to_cloud()
-        elif self.job_record['state'] == 'stored':
-            return self.submit_to_speech_api()
-        elif self.job_record['state'] == 'submitted':
-            return self.poll_speech_api()
-        elif self.job_record['state'] == 'transcribed':
-            return self.clean_cloud()
-        elif self.job_record['state'] == 'cleaned':
-            # empty, skip to done
-            self.job_record['state'] = 'done'
-            self.pstorage.save()
-            # remove self from poll loop
-            idxs = [i for (i, j) in enumerate(self.poll_loop) if j.identity(self.job_name)]
-            for idx in reversed(idxs):
-                logger.info('Removing poll loop action: %s', str(self.poll_loop[idx]))
-                del self.poll_loop[idx]
+        current_state = self.job_record['state']
+        state_idx = [i for i, (x, y) in enumerate(TranscriptionJobAction.STATES) if x == current_state]
+        if not state_idx:
+            logger.error('Cannot interpret TranscriptionJob state %s', current_state)
+            return False
+        state_idx = state_idx[0]
+        state_action = TranscriptionJobAction.STATES[state_idx][1]
+        if state_idx < len(TranscriptionJobAction.STATES) - 1:
+            next_state = TranscriptionJobAction.STATES[state_idx + 1][0]
+        else:
+            next_state = current_state
+        return state_action(self, next_state)
 
-    def download(self):
+    def download(self, next_state):
         logger.info('Downloading %s', str(self))
         drive_download_file(self.services['drive'],
                             self.job_record['drive_id'],
                             local_amr_path(self.job_name), True)
-        self.job_record['state'] = 'downloaded'
+        self.job_record['state'] = next_state
         self.pstorage.save()
         return True
 
-    def transcode_to_wav(self):
+    def transcode_to_wav(self, next_state):
         logger.info('Transcoding to wav %s', str(self))
         convert_amr_to_wav(local_amr_path(self.job_name), local_wav_path(self.job_name))
-        self.job_record['state'] = 'wav'
+        self.job_record['state'] = next_state
         self.pstorage.save()
         return True
 
-    def trim_wav(self):
+    def trim_wav(self, next_state):
         logger.info('Trimming wav %s', str(self))
         trim_silence(local_wav_path(self.job_name), local_trimmed_wav_path(self.job_name))
-        self.job_record['state'] = 'trimmed'
+        self.job_record['state'] = next_state
         self.pstorage.save()
         return True
 
-    def upload_to_cloud(self):
+    def upload_to_cloud(self, next_state):
         logger.info('Uploading to cloud storage %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
         response = cloud_upload_object(self.services['cloud'], BUCKET, filename = filename)
@@ -489,7 +490,7 @@ class TranscriptionJobAction(LoopAction):
                 return True
         return False
 
-    def submit_to_speech_api(self):
+    def submit_to_speech_api(self, next_state):
         logger.info('Submitting to speech API %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
         phrases = ["semantics"," representation", "representational", "denotation",
@@ -498,31 +499,41 @@ class TranscriptionJobAction(LoopAction):
                                                 filename, phrases = phrases)
         if response is not None and 'name' in response:
             self.job_record['cloud_id'] = response['name']
-            self.job_record['state'] = 'submitted'
+            self.job_record['state'] = next_state
             self.pstorage.save()
             return False
         return False
 
-    def poll_speech_api(self):
+    def poll_speech_api(self, next_state):
         response = poll_transcription_results(self.services['speech'], self.job_record['cloud_id'])
         if 'done' in response and response['done']:
             logger.info('Speech API finished %s', str(self))
             with open(local_transcription_path(self.job_name), 'w') as output_file:
                 for result in response['response']['results']:
                     output_file.write(result['alternatives'][0]['transcript'] + "\n")
-            self.job_record['state'] = 'transcribed'
+            self.job_record['state'] = next_state
             self.pstorage.save()
             return True
         return False
 
-    def clean_cloud(self):
+    def clean_cloud(self, next_state):
         logger.info('Deleting from cloud %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
         response = cloud_delete_object(self.services['cloud'], BUCKET, filename)
         # response seems to be always empty
-        self.job_record['state'] = 'cleaned'
+        self.job_record['state'] = next_state
         self.pstorage.save()
         return True
+
+    def destruct(self, next_state):
+        # empty, skip to done
+        self.job_record['state'] = next_state
+        self.pstorage.save()
+        # remove self from poll loop
+        idxs = [i for (i, j) in enumerate(self.poll_loop) if j.identity(self.job_name)]
+        for idx in reversed(idxs):
+            logger.info('Removing poll loop action: %s', str(self.poll_loop[idx]))
+            del self.poll_loop[idx]
 
 FOLDER_NAME = 'Exams'
 BUCKET = 'semantics-exam-marking.appspot.com'
