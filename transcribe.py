@@ -20,16 +20,23 @@ Google Cloud Speech API sample application using the REST API for
 async batch processing.
 """
 
-import argparse
+import logging
 import os
 import subprocess
+import sys
 import time
 from apiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from datastore import PersistentDict
 from googleapiclient import discovery
 from oauth2client import client
 from oauth2client import tools
 from oauth2client.file import Storage
 import httplib2
+
+logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s',
+                    stream=sys.stderr, level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 
 # ============================================================
 #  AUTHORISATION
@@ -142,7 +149,7 @@ def drive_download_file(drive_service, file_id, output_filename, verbose = False
         while done is False:
             status, done = downloader.next_chunk()
             if verbose:
-                print "Download %d%%." % int(status.progress() * 100)
+                logger.info("Download %d%%.", int(status.progress() * 100))
 
 # ============================================================
 #  GOOGLE CLOUD STORAGE API
@@ -276,6 +283,16 @@ def local_trimmed_wav_path(filename):
     return os.path.join('trimmed_wav_files',
                         os.path.basename(filename).replace('.amr', '.wav'))
 
+def local_transcription_path(filename):
+    '''
+    Returns the path on the local drive where transcribed TXT files are stored.
+
+    Arguments:
+    - `filename`: the basename of an AMR file
+    '''
+    return os.path.join('transcriptions',
+                        os.path.basename(filename).replace('.amr', '.txt'))
+
 FFMPEG = subprocess.check_output(['which', 'ffmpeg']).strip()
 def convert_amr_to_wav(amr_filename, wav_filename):
     '''
@@ -305,17 +322,8 @@ def trim_silence(input_wav_filename, output_wav_filename):
                      '-1', minimum_silence_secs, silence_threshold])
 
 # ============================================================
-#  NOTES
+#  PROGRAM LOGIC
 # ============================================================
-
-#drive_download_file(service, results['files'][0]['id'], local_amr_path(results['files'][0]['name']), True)
-#convert_amr_to_wav(local_amr_path(results['files'][0]['name']), local_wav_path(results['files'][0]['name']))
-#trim_silence(local_wav_path(results['files'][0]['name']), local_trimmed_wav_path(results['files'][0]['name']))
-
-#filename= 'amr_files/report3.amr'
-#bucket = 'semantics-exam-marking.appspot.com'
-#response = cloud_upload_object(cloud_service, bucket, filename)
-#os.stat(filename).st_size == int(response['size'])
 
 # interpret timestamps on file objects:
 #
@@ -324,47 +332,227 @@ def trim_silence(input_wav_filename, output_wav_filename):
 # import pytz
 # datetime.datetime.now(tz=pytz.utc) > dt
 
-# service = get_drive_service()
-# folder_name = 'Exams'
-# folder_id = get_folder_id(service, folder_name)
-# if folder_id is None:
-#     print 'ERROR: could not find Google Drive folder "{}"'.format(folder_name)
-#     return
-# results = list_most_recent_files(drive_service, folder_id)
+class LoopAction(object):
+    '''An action which runs in the polling loop.'''
 
-# ============================================================
-#  MAIN FUNCTION
-# ============================================================
+    def __init__(self, pstorage, services, poll_loop):
+        '''Constructor.'''
+        self.pstorage = pstorage
+        self.services = services
+        self.poll_loop = poll_loop
 
-def main(bucket, filename):
-    """Transcribe the given audio file asynchronously.
-    Args:
-        filename: the name of the audio file.
-    """
+    def __str__(self):
+        return '<LoopAction>'
 
-    service = get_speech_service()
-    phrases = ["semantics"," representation", "representational", "denotation",
-               "denotational", "reference", "referential"]
-    response = submit_transcription_request(service, bucket, filename, phrases = phrases)
-    #print(json.dumps(response))
-    name = response['name']
+    def tick(self):
+        '''Tick method'''
+        pass
 
-    while True:
-        # Give the server a few seconds to process.
-        print('Waiting for server processing...')
-        time.sleep(2)
-        # Get the long running operation with response.
-        response = poll_transcription_results(service, name)
+    def identity(self, job_id):
+        '''Identity predicate: returns True if this job identifies as `job_id`.'''
+        return False
 
+class DriveMonitorAction(LoopAction):
+    '''Monitor the Google Drive folder and create new jobs.'''
+
+    def __init__(self, pstorage, services, poll_loop, folder_name):
+        '''Constructor.'''
+        super(DriveMonitorAction, self).__init__(pstorage, services, poll_loop)
+        self.folder_name = folder_name
+        self.folder_id = None
+
+    def __str__(self):
+        return '<DriveMonitor folder={}>'.format(self.folder_name)
+
+    def tick(self):
+        '''Tick method'''
+        # cache the folder ID
+        if self.folder_id is None:
+            self.folder_id = drive_get_folder_id(self.services['drive'], self.folder_name)
+        if self.folder_id is None:
+            logger.fatal('Could not find Google Drive folder "%s"', self.folder_name)
+            raise Exception('ERROR: could not find Google Drive folder "{}"'.format(
+                self.folder_name))
+        # refresh the list of files in the google drive
+        results = drive_list_most_recent_files(self.services['drive'], self.folder_id)
+        if 'files' not in results:
+            return False
+        # update the persistent storage
+        self.pstorage['drive_files'] = results['files']
+        # create new jobs
+        if not 'jobs' in self.pstorage:
+            self.pstorage['jobs'] = {}
+        num_created = 0
+        for dfile in self.pstorage['drive_files']:
+            if dfile['name'] not in self.pstorage['jobs']:
+                job = TranscriptionJobAction(self.pstorage, self.services, self.poll_loop,
+                                             dfile['name'])
+                if job.initialised:
+                    self.poll_loop.append(job)
+                    num_created += 1
+        if num_created:
+            logger.info('Drive Monitor created %d new jobs', num_created)
+        # done
+        return num_created > 0
+
+class TranscriptionJobAction(LoopAction):
+    '''Monitor the Google Drive folder and create new jobs.'''
+
+    def __init__(self, pstorage, services, poll_loop, job_name):
+        '''Constructor.'''
+        super(TranscriptionJobAction, self).__init__(pstorage, services, poll_loop)
+        self.job_name = job_name
+        if not 'jobs' in self.pstorage:
+            self.pstorage['jobs'] = {}
+        self.initialised = True
+        # check for a job record in the pstorage
+        if self.job_name in self.pstorage['jobs']:
+            self.job_record = self.pstorage['jobs'][self.job_name]
+        else:
+            logger.info('Initialising job %s', self.job_name)
+            ids = [dfile['id'] for dfile in pstorage['drive_files']
+                   if dfile['name'] == self.job_name]
+            if not ids:
+                logger.error('Could not retrieve Google Drive file ID for file "%s"', self.job_name)
+                self.initialised = False
+                return
+            self.job_record = {
+                'cloud_id': 'unknown',
+                'state': 'uploaded',
+                'drive_id': ids[0],
+            }
+            self.pstorage['jobs'][self.job_name] = self.job_record
+            self.pstorage.save()
+
+    def __str__(self):
+        return '<Transcribe name={} state={}>'.format(self.job_name, self.job_record['state'])
+
+    def identity(self, job_id):
+        '''Identity predicate: returns True if this job identifies as `job_id`.'''
+        return job_id == self.job_name
+
+    def tick(self):
+        '''Tick method'''
+        if self.job_record['state'] == 'uploaded':
+            return self.download()
+        elif self.job_record['state'] == 'downloaded':
+            return self.transcode_to_wav()
+        elif self.job_record['state'] == 'wav':
+            return self.trim_wav()
+        elif self.job_record['state'] == 'trimmed':
+            return self.upload_to_cloud()
+        elif self.job_record['state'] == 'stored':
+            return self.submit_to_speech_api()
+        elif self.job_record['state'] == 'submitted':
+            return self.poll_speech_api()
+        elif self.job_record['state'] == 'transcribed':
+            return self.clean_cloud()
+        elif self.job_record['state'] == 'cleaned':
+            # empty, skip to done
+            self.job_record['state'] = 'done'
+            self.pstorage.save()
+            # remove self from poll loop
+            idxs = [i for (i, j) in enumerate(self.poll_loop) if j.identity(self.job_name)]
+            for idx in reversed(idxs):
+                logger.info('Removing poll loop action: %s', str(self.poll_loop[idx]))
+                del self.poll_loop[idx]
+
+    def download(self):
+        logger.info('Downloading %s', str(self))
+        drive_download_file(self.services['drive'],
+                            self.job_record['drive_id'],
+                            local_amr_path(self.job_name), True)
+        self.job_record['state'] = 'downloaded'
+        self.pstorage.save()
+        return True
+
+    def transcode_to_wav(self):
+        logger.info('Transcoding to wav %s', str(self))
+        convert_amr_to_wav(local_amr_path(self.job_name), local_wav_path(self.job_name))
+        self.job_record['state'] = 'wav'
+        self.pstorage.save()
+        return True
+
+    def trim_wav(self):
+        logger.info('Trimming wav %s', str(self))
+        trim_silence(local_wav_path(self.job_name), local_trimmed_wav_path(self.job_name))
+        self.job_record['state'] = 'trimmed'
+        self.pstorage.save()
+        return True
+
+    def upload_to_cloud(self):
+        logger.info('Uploading to cloud storage %s', str(self))
+        filename = local_trimmed_wav_path(self.job_name)
+        response = cloud_upload_object(self.services['cloud'], BUCKET, filename = filename)
+        if response:
+            if os.stat(filename).st_size == int(response['size']):
+                return True
+        return False
+
+    def submit_to_speech_api(self):
+        logger.info('Submitting to speech API %s', str(self))
+        filename = local_trimmed_wav_path(self.job_name)
+        phrases = ["semantics"," representation", "representational", "denotation",
+                   "denotational", "reference", "referential"]
+        response = submit_transcription_request(self.services['speech'], BUCKET,
+                                                filename, phrases = phrases)
+        if response is not None and 'name' in response:
+            self.job_record['cloud_id'] = response['name']
+            self.job_record['state'] = 'submitted'
+            self.pstorage.save()
+            return False
+        return False
+
+    def poll_speech_api(self):
+        response = poll_transcription_results(self.services['speech'], self.job_record['cloud_id'])
         if 'done' in response and response['done']:
-            break
+            logger.info('Speech API finished %s', str(self))
+            with open(local_transcription_path(self.job_name), 'w') as output_file:
+                for result in response['response']['results']:
+                    output_file.write(result['alternatives'][0]['transcript'] + "\n")
+            self.job_record['state'] = 'transcribed'
+            self.pstorage.save()
+            return True
+        return False
 
-    for x in response['response']['results']:
-        print x['alternatives'][0]['transcript']
+    def clean_cloud(self):
+        logger.info('Deleting from cloud %s', str(self))
+        filename = local_trimmed_wav_path(self.job_name)
+        response = cloud_delete_object(self.services['cloud'], BUCKET, filename)
+        # response seems to be always empty
+        self.job_record['state'] = 'cleaned'
+        self.pstorage.save()
+        return True
+
+FOLDER_NAME = 'Exams'
+BUCKET = 'semantics-exam-marking.appspot.com'
+
+def main():
+    # load the persistent storage object
+    pstorage = PersistentDict('pstorage.json')
+
+    # create services
+    services = {'drive': get_drive_service(),
+                'storage': get_cloud_storage_service(),
+                'speech': get_speech_service()}
+
+    # construct the polling loop:
+    poll_loop = []
+    # google drive monitor
+    poll_loop.append(DriveMonitorAction(pstorage, services, poll_loop, FOLDER_NAME))
+    # any (unfinished) jobs
+    poll_loop.extend([TranscriptionJobAction(pstorage, services, poll_loop, job_name)
+                      for job_name in pstorage['jobs'].keys()])
+
+    # polling loop:
+    while True:
+        # tick all the jobs in the loop
+        nowait = False
+        for job in poll_loop:
+            nowait = nowait or job.tick()
+        if not nowait:
+            # wait
+            time.sleep(5)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        'speech_file', help='Full path of audio file to be recognized')
-    args = parser.parse_args()
-    main('semantics-exam-marking.appspot.com', args.speech_file)
+    main()
