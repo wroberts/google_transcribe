@@ -459,7 +459,8 @@ class TranscriptionJobAction(LoopAction):
         if not self.should_tick():
             return False
         current_state = self.job_record['state']
-        state_idx = [i for i, (x, y) in enumerate(TranscriptionJobAction.STATES) if x == current_state]
+        state_idx = [i for i, (x, y) in enumerate(TranscriptionJobAction.STATES)
+                     if x == current_state]
         if not state_idx:
             logger.error('Cannot interpret TranscriptionJob state %s', current_state)
             return False
