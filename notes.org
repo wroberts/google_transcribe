@@ -1,4 +1,39 @@
-#+STARTUP: content hidestars odd
+#+STARTUP: odd showall hidestars
+#+TITLE:  
+#+AUTHOR: Will Roberts
+#+EMAIL:  will.roberts@anglistik.hu-berlin.de
+#+DATE:   28 October, 2016
+#+LATEX_CLASS: article
+#+LATEX_CLASS_OPTIONS: [11pt,a4paper]
+#+OPTIONS: toc:nil
+#+TAGS: export(e) noexport(n)
+#+EXPORT_SELECT_TAGS: export
+#+EXPORT_EXCLUDE_TAGS: noexport
+#+LATEX_HEADER: \usepackage[a4paper, top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
+#+LATEX_HEADER: \usepackage{parskip}
+#+LATEX_HEADER: \usepackage[sc,osf]{mathpazo}
+#+LATEX_HEADER: \linespread{1.05}
+#+LATEX_HEADER: \usepackage[scaled]{helvet}
+#+LATEX_HEADER: \usepackage{courier}
+#+LATEX_HEADER: \usepackage{adjustbox}
+#+LATEX_HEADER: \usepackage{microtype}
+
+* design
+
+  #+LaTeX: \begin{adjustbox}{max width=\textwidth, max height=\textheight}
+  #+BEGIN_SRC dot :cmdline -Tpdf :file flowchart.pdf :exports results
+    digraph G {
+     uploaded -> downloaded [label="downloaded to local drive"];
+     downloaded -> wav [label="converted using ffmpeg"];
+     wav -> trimmed [label="trimmed with sox"];
+     trimmed -> stored [label="uploaded to cloud storage"];
+     stored -> submitted [label="job submitted to speech api"];
+     submitted -> transcribed [label="speech api job complete"];
+     transcribed -> cleaned [label="removed from cloud storage"];
+     cleaned -> done;
+    }
+  #+END_SRC
+  #+LaTeX: \end{adjustbox}
 
 * command line interface
   
@@ -20,9 +55,9 @@
 
 * google drive api
 
-  [[https://developers.google.com/drive/v3/web/about-sdk][Google Drive REST API Overview  |  Drive REST API  |  Google Developers]]
-  [[https://developers.google.com/drive/v3/web/manage-downloads][Download Files  |  Drive REST API  |  Google Developers]]
-  [[https://developers.google.com/drive/v3/web/about-auth][About Authorization  |  Drive REST API  |  Google Developers]]
+  [[https://developers.google.com/drive/v3/web/about-sdk][Google Drive REST API Overview  |  Drive REST API  |  Google Developers]]
+  [[https://developers.google.com/drive/v3/web/manage-downloads][Download Files  |  Drive REST API  |  Google Developers]]
+  [[https://developers.google.com/drive/v3/web/about-auth][About Authorization  |  Drive REST API  |  Google Developers]]
 
 * silence removal
 
@@ -30,4 +65,4 @@
 
 * google cloud storage api
 
-  [[https://cloud.google.com/storage/docs/json_api/v1/json-api-python-samples][Python Example  |  Cloud Storage Documentation  |  Google Cloud Platform]]
+  [[https://cloud.google.com/storage/docs/json_api/v1/json-api-python-samples][Python Example  |  Cloud Storage Documentation  |  Google Cloud Platform]]
