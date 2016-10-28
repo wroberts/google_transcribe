@@ -340,6 +340,7 @@ class LoopAction(object):
         self.pstorage = pstorage
         self.services = services
         self.poll_loop = poll_loop
+        self.next_tick_time = time.time() - 1
 
     def __str__(self):
         return '<LoopAction>'
@@ -347,6 +348,12 @@ class LoopAction(object):
     def tick(self):
         '''Tick method'''
         pass
+
+    def should_tick(self):
+        return self.next_tick_time < time.time()
+
+    def set_next_tick(self, wait_time_secs):
+        self.next_tick_time = time.time() + wait_time_secs
 
     def identity(self, job_id):
         '''Identity predicate: returns True if this job identifies as `job_id`.'''
@@ -366,6 +373,9 @@ class DriveMonitorAction(LoopAction):
 
     def tick(self):
         '''Tick method'''
+        if not self.should_tick():
+            return False
+        self.set_next_tick(30) # 30 seconds between checking drive
         # cache the folder ID
         if self.folder_id is None:
             self.folder_id = drive_get_folder_id(self.services['drive'], self.folder_name)
@@ -374,6 +384,7 @@ class DriveMonitorAction(LoopAction):
             raise Exception('ERROR: could not find Google Drive folder "{}"'.format(
                 self.folder_name))
         # refresh the list of files in the google drive
+        logger.info('Checking Google Drive ...')
         results = drive_list_most_recent_files(self.services['drive'], self.folder_id)
         if 'files' not in results:
             return False
@@ -445,6 +456,8 @@ class TranscriptionJobAction(LoopAction):
 
     def tick(self):
         '''Tick method'''
+        if not self.should_tick():
+            return False
         current_state = self.job_record['state']
         state_idx = [i for i, (x, y) in enumerate(TranscriptionJobAction.STATES) if x == current_state]
         if not state_idx:
@@ -463,6 +476,8 @@ class TranscriptionJobAction(LoopAction):
         drive_download_file(self.services['drive'],
                             self.job_record['drive_id'],
                             local_amr_path(self.job_name), True)
+        time.sleep(0.5)
+        # TODO: check that operation succeeded
         self.job_record['state'] = next_state
         self.pstorage.save()
         return True
@@ -470,6 +485,7 @@ class TranscriptionJobAction(LoopAction):
     def transcode_to_wav(self, next_state):
         logger.info('Transcoding to wav %s', str(self))
         convert_amr_to_wav(local_amr_path(self.job_name), local_wav_path(self.job_name))
+        # TODO: check that operation succeeded
         self.job_record['state'] = next_state
         self.pstorage.save()
         return True
@@ -477,6 +493,7 @@ class TranscriptionJobAction(LoopAction):
     def trim_wav(self, next_state):
         logger.info('Trimming wav %s', str(self))
         trim_silence(local_wav_path(self.job_name), local_trimmed_wav_path(self.job_name))
+        # TODO: check that operation succeeded
         self.job_record['state'] = next_state
         self.pstorage.save()
         return True
@@ -485,9 +502,13 @@ class TranscriptionJobAction(LoopAction):
         logger.info('Uploading to cloud storage %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
         response = cloud_upload_object(self.services['cloud'], BUCKET, filename = filename)
+        time.sleep(0.5)
         if response:
             if os.stat(filename).st_size == int(response['size']):
+                self.job_record['state'] = next_state
+                self.pstorage.save()
                 return True
+        self.set_next_tick(5)
         return False
 
     def submit_to_speech_api(self, next_state):
@@ -497,6 +518,8 @@ class TranscriptionJobAction(LoopAction):
                    "denotational", "reference", "referential"]
         response = submit_transcription_request(self.services['speech'], BUCKET,
                                                 filename, phrases = phrases)
+        time.sleep(0.5)
+        self.set_next_tick(15)
         if response is not None and 'name' in response:
             self.job_record['cloud_id'] = response['name']
             self.job_record['state'] = next_state
@@ -506,6 +529,7 @@ class TranscriptionJobAction(LoopAction):
 
     def poll_speech_api(self, next_state):
         response = poll_transcription_results(self.services['speech'], self.job_record['cloud_id'])
+        time.sleep(0.5)
         if 'done' in response and response['done']:
             logger.info('Speech API finished %s', str(self))
             with open(local_transcription_path(self.job_name), 'w') as output_file:
@@ -514,12 +538,14 @@ class TranscriptionJobAction(LoopAction):
             self.job_record['state'] = next_state
             self.pstorage.save()
             return True
+        self.set_next_tick(10)
         return False
 
     def clean_cloud(self, next_state):
         logger.info('Deleting from cloud %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
         response = cloud_delete_object(self.services['cloud'], BUCKET, filename)
+        time.sleep(0.5)
         # response seems to be always empty
         self.job_record['state'] = next_state
         self.pstorage.save()
@@ -534,6 +560,8 @@ class TranscriptionJobAction(LoopAction):
         for idx in reversed(idxs):
             logger.info('Removing poll loop action: %s', str(self.poll_loop[idx]))
             del self.poll_loop[idx]
+        self.set_next_tick(30)
+        return False
 
 FOLDER_NAME = 'Exams'
 BUCKET = 'semantics-exam-marking.appspot.com'
@@ -557,13 +585,13 @@ def main():
 
     # polling loop:
     while True:
-        # tick all the jobs in the loop
-        nowait = False
+        # tick all the jobs in the loop (jobs manage their own timing
+        # independently)
         for job in poll_loop:
-            nowait = nowait or job.tick()
-        if not nowait:
-            # wait
-            time.sleep(5)
+            while job.tick():
+                pass
+        # wait
+        time.sleep(1)
 
 if __name__ == '__main__':
     main()
