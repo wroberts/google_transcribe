@@ -61,3 +61,6 @@ class PersistentDict(dict):
     def __setitem__(self, key, value):
         super(PersistentDict, self).__setitem__(key, value)
         store_data(self._filename, self)
+
+    def save(self):
+        store_data(self._filename, self)
