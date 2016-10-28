@@ -24,4 +24,10 @@
   [[https://developers.google.com/drive/v3/web/manage-downloads][Download Files  |  Drive REST API  |  Google Developers]]
   [[https://developers.google.com/drive/v3/web/about-auth][About Authorization  |  Drive REST API  |  Google Developers]]
 
+* silence removal
 
+  http://unix.stackexchange.com/questions/293376/remove-silence-from-audio-files-while-leaving-gaps
+
+* google cloud storage api
+
+  [[https://cloud.google.com/storage/docs/json_api/v1/json-api-python-samples][Python Example  |  Cloud Storage Documentation  |  Google Cloud Platform]]
