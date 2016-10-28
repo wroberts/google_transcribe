@@ -26,9 +26,7 @@ from googleapiclient import discovery
 import httplib2
 from oauth2client.client import GoogleCredentials
 
-# http://unix.stackexchange.com/questions/293376/remove-silence-from-audio-files-while-leaving-gaps
-
-def get_speech_service():
+def get_service_acct_authorised_http():
     # Application default credentials provided by env variable
     # GOOGLE_APPLICATION_CREDENTIALS
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials/semantics-exam-marking.json'
@@ -36,8 +34,10 @@ def get_speech_service():
         ['https://www.googleapis.com/auth/cloud-platform'])
     http = httplib2.Http()
     credentials.authorize(http)
-    #return http
-    #http = get_authorised_http()
+    return http
+
+def get_speech_service():
+    http = get_service_acct_authorised_http()
     service = discovery.build('speech', 'v1beta1', http=http)
     return service
 
