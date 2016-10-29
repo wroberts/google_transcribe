@@ -2,6 +2,7 @@
 *.fls
 *.pyc
 *~
+.DS_Store
 /amr_files/
 /credentials/
 /flowchart.pdf
