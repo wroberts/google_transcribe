@@ -670,7 +670,8 @@ def main():
     Main function.
     '''
     # load the persistent storage object
-    pstorage = PersistentDict('pstorage.json')
+    mkdir_p(APP_CONFIG_DIR)
+    pstorage = PersistentDict(os.path.join(APP_CONFIG_DIR, 'pstorage.json'))
 
     # create services
     services = {'drive': get_drive_service(),
