@@ -3,14 +3,8 @@
 *.pyc
 *~
 .DS_Store
-/amr_files/
-/credentials/
 /flowchart.pdf
 /flowchart.png
 /notes.pdf
 /notes.tex
-/pstorage.json
-/transcriptions/
-/trimmed_wav_files/
-/wav_files/
 auto/
