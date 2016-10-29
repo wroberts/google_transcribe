@@ -23,6 +23,7 @@ Server process to manage speech transcription using the Google Cloud
 Speech API.
 '''
 
+from __future__ import absolute_import, unicode_literals
 import errno
 import logging
 import mimetypes
@@ -32,7 +33,7 @@ import sys
 import time
 from apiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from appdirs import AppDirs
-from datastore import PersistentDict
+from .datastore import PersistentDict
 from googleapiclient import discovery
 from oauth2client import client
 from oauth2client import tools

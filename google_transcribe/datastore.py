@@ -9,6 +9,7 @@ A dict-like object which is a persistent data store, backed by a
 JSON-formatted file.
 '''
 
+from __future__ import absolute_import, unicode_literals
 import json
 
 def store_data(json_filename, data):
@@ -20,7 +21,7 @@ def store_data(json_filename, data):
     - `json_filename`:
     - `data`:
     '''
-    with open(json_filename, 'w') as output_file:
+    with open(json_filename, 'wb') as output_file:
         json_data = json.dumps(data, sort_keys=True, indent=4, ensure_ascii=False)
         output_file.write(json_data.encode('utf-8'))
 
@@ -32,7 +33,7 @@ def load_data(json_filename):
     Arguments:
     - `json_filename`:
     '''
-    with open(json_filename, 'r') as input_file:
+    with open(json_filename, 'rb') as input_file:
         return json.loads(input_file.read().decode('utf-8'))
 
 class PersistentDict(dict):
