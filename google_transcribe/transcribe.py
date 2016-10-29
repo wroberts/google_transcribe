@@ -175,6 +175,9 @@ def drive_list_most_recent_files(drive_service, folder_id):
         fields="nextPageToken, files(id, mimeType, modifiedTime, name, parents)").execute()
     return results
 
+# https://developers.google.com/drive/v3/web/about-sdk
+# https://developers.google.com/drive/v3/web/manage-downloads
+# https://developers.google.com/drive/v3/web/about-auth
 def drive_download_file(drive_service, file_id, output_filename, verbose = False):
     '''
     Downloads the file with the given file ID on the user's Google
@@ -412,6 +415,7 @@ def trim_silence(input_wav_filename, output_wav_filename):
     silence_threshold = '0.1%'
     ignore_bursts_secs = '0.1'
     minimum_silence_secs = '2.0'
+    # http://unix.stackexchange.com/questions/293376/remove-silence-from-audio-files-while-leaving-gaps
     subprocess.call([SOX, input_wav_filename, output_wav_filename,
                      'silence', '-l',
                      '1', ignore_bursts_secs, silence_threshold,
