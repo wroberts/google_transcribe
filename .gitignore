@@ -3,8 +3,6 @@
 *.pyc
 *~
 .DS_Store
-/flowchart.pdf
-/flowchart.png
 /notes.pdf
 /notes.tex
 auto/
