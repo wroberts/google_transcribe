@@ -29,7 +29,8 @@
      trimmed -> stored [label="uploaded to cloud storage"];
      stored -> submitted [label="job submitted to speech api"];
      submitted -> transcribed [label="speech api job complete"];
-     transcribed -> cleaned [label="removed from cloud storage"];
+     transcribed -> saved [label="transcription uploaded to google drive"];
+     saved -> cleaned [label="removed from cloud storage"];
      cleaned -> done;
     }
   #+END_SRC

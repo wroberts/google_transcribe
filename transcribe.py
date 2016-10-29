@@ -66,7 +66,7 @@ APPLICATION_DIRS = AppDirs('google-transcribe', 'wkr', version='1.0')
 APP_CONFIG_DIR = APPLICATION_DIRS.user_config_dir
 APP_CACHE_DIR = APPLICATION_DIRS.user_cache_dir
 
-def get_credentials_path(filename):
+def get_credentials_path(filename, check_file_exists=True):
     '''
     Gets the full path to a file stored in the credentials
     subdirectory of this application's configuration directory.
@@ -76,7 +76,7 @@ def get_credentials_path(filename):
         logger.fatal('Could not find credentials directory')
         raise Exception('Could not find credentials directory')
     path = os.path.join(path, filename)
-    if not os.path.exists(path):
+    if check_file_exists and not os.path.exists(path):
         logger.fatal('Could not find credentials file %s', filename)
         raise Exception('Could not find credentials file {}'.format(filename))
     return path
@@ -87,9 +87,9 @@ def get_drive_service():
     '''
     flow = client.flow_from_clientsecrets(
         get_credentials_path('secret.json'),
-        'https://www.googleapis.com/auth/drive.readonly')
+        'https://www.googleapis.com/auth/drive')
     flow.user_agent = USER_AGENT_NAME
-    store = Storage(get_credentials_path('storage.dat'))
+    store = Storage(get_credentials_path('storage.dat', False))
     credentials = store.get()
     if not credentials or credentials.invalid:
         flags = tools.argparser.parse_args(args=[])
@@ -169,7 +169,7 @@ def drive_list_most_recent_files(drive_service, folder_id):
         q="'{}' in parents and mimeType contains 'audio/'".format(folder_id),
         spaces='drive',
         corpus='user',
-        fields="nextPageToken, files(id, mimeType, modifiedTime, name)").execute()
+        fields="nextPageToken, files(id, mimeType, modifiedTime, name, parents)").execute()
     return results
 
 def drive_download_file(drive_service, file_id, output_filename, verbose = False):
@@ -191,6 +191,35 @@ def drive_download_file(drive_service, file_id, output_filename, verbose = False
             status, done = downloader.next_chunk()
             if verbose:
                 logger.info("Download %d%%.", int(status.progress() * 100))
+
+# http://stackoverflow.com/q/20922944/1062499
+# https://developers.google.com/drive/v3/web/manage-uploads
+# https://developers.google.com/drive/v3/reference/files/create
+def drive_upload_file(drive_service, input_filename, mimetype, parent_folder_ids):
+    '''
+    Uploads a file from the local disk (stored at `input_filename`) to
+    the user's Google Drive, placing it in the directories indicated
+    with `parent_folder_ids`.
+
+    Arguments:
+    - `drive_service`:
+    - `input_filename`:
+    - `mimetype`:
+    - `parent_folder_ids`: a list of Google Drive folder IDs, where
+      the file will be stored
+    '''
+    body = {
+        'name': os.path.basename(input_filename),
+        'mimeType': mimetype,
+        'parents': parent_folder_ids,
+    }
+
+    with open(input_filename, 'rb') as input_file:
+        req = drive_service.files().create(
+            body=body,
+            media_body=MediaIoBaseUpload(input_file, mimetype))
+        response = req.execute()
+    return response
 
 # ============================================================
 #  GOOGLE CLOUD STORAGE API
@@ -488,16 +517,18 @@ class TranscriptionJobAction(LoopAction):
             self.job_record = self.pstorage['jobs'][self.job_name]
         else:
             logger.info('Initialising job %s', self.job_name)
-            ids = [dfile['id'] for dfile in pstorage['drive_files']
+            idx = [i for i, dfile in enumerate(pstorage['drive_files'])
                    if dfile['name'] == self.job_name]
-            if not ids:
+            if not idx:
                 logger.error('Could not retrieve Google Drive file ID for file "%s"', self.job_name)
                 self.initialised = False
                 return
+            idx = idx[0]
             self.job_record = {
                 'storage_id': 'unknown',
                 'state': 'uploaded',
-                'drive_id': ids[0],
+                'drive_id': pstorage['drive_files'][idx]['id'],
+                'drive_parents': pstorage['drive_files'][idx]['parents'],
             }
             self.pstorage['jobs'][self.job_name] = self.job_record
             self.pstorage.save()
@@ -621,6 +652,23 @@ class TranscriptionJobAction(LoopAction):
         self.set_next_tick(10)
         return False
 
+    def save_transcription(self, next_state):
+        '''
+        State machine action to upload the transcription in TXT file
+        format to the user's Google Drive.
+        '''
+        logger.info('Uploading transcription to google drive %s', str(self))
+        filename = local_transcription_path(self.job_name)
+        response = drive_upload_file(self.services['drive'], filename, 'text/plain',
+                                     self.job_record['drive_parents'])
+        time.sleep(0.5)
+        if 'id' in response:
+            self.job_record['state'] = next_state
+            self.pstorage.save()
+            return True
+        self.set_next_tick(10)
+        return False
+
     def clean_cloud(self, next_state):
         '''
         State machine action to delete a WAV file from the Google Cloud Storage.
@@ -660,7 +708,8 @@ TRANSCRIPTION_JOB_STATES = [
     ('trimmed', TranscriptionJobAction.upload_to_cloud),
     ('stored', TranscriptionJobAction.submit_to_speech_api),
     ('submitted', TranscriptionJobAction.poll_speech_api),
-    ('transcribed', TranscriptionJobAction.clean_cloud),
+    ('transcribed', TranscriptionJobAction.save_transcription),
+    ('saved', TranscriptionJobAction.clean_cloud),
     ('cleaned', TranscriptionJobAction.destruct),
     ('done', None),
 ]
