@@ -15,10 +15,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Google Cloud Speech API sample application using the REST API for
-async batch processing.
-"""
+'''
+transcribe.py
+(c) Will Roberts  29 October, 2016
+
+Server process to manage speech transcription using the Google Cloud
+Speech API.
+'''
 
 import logging
 import os
@@ -73,7 +76,7 @@ def get_service_acct_http():
     credentials.authorize(http)
     return http
 
-def get_cloud_storage_service():
+def get_storage_service():
     '''
     Returns an object used to interact with the Google Cloud Storage
     API.
@@ -156,12 +159,12 @@ def drive_download_file(drive_service, file_id, output_filename, verbose = False
 # ============================================================
 
 # https://cloud.google.com/storage/docs/json_api/v1/json-api-python-samples
-def cloud_upload_object(cloud_service, bucket, filename):
+def storage_upload_object(storage_service, bucket, filename):
     '''
     Uploads a file from the local drive to the Google Cloud Storage.
 
     Arguments:
-    - `cloud_service`:
+    - `storage_service`:
     - `bucket`:
     - `filename`:
     '''
@@ -174,7 +177,7 @@ def cloud_upload_object(cloud_service, bucket, filename):
     # Now insert them into the specified bucket as a media insertion.
     # http://g.co/dv/resources/api-libraries/documentation/storage/v1/python/latest/storage_v1.objects.html#insert
     with open(filename, 'rb') as input_file:
-        req = cloud_service.objects().insert(
+        req = storage_service.objects().insert(
             bucket=bucket, body=body,
             # You can also just set media_body=filename, but for the sake of
             # demonstration, pass in the more generic file handle, which could
@@ -185,16 +188,16 @@ def cloud_upload_object(cloud_service, bucket, filename):
     return resp
 
 # https://cloud.google.com/storage/docs/json_api/v1/json-api-python-samples
-def cloud_delete_object(cloud_service, bucket, filename):
+def storage_delete_object(storage_service, bucket, filename):
     '''
     Deletes a file from the Google Cloud Storage.
 
     Arguments:
-    - `cloud_service`:
+    - `storage_service`:
     - `bucket`:
     - `filename`:
     '''
-    req = cloud_service.objects().delete(bucket=bucket, object=os.path.basename(filename))
+    req = storage_service.objects().delete(bucket=bucket, object=os.path.basename(filename))
     resp = req.execute()
 
     return resp
@@ -203,7 +206,7 @@ def cloud_delete_object(cloud_service, bucket, filename):
 #  GOOGLE CLOUD SPEECH API
 # ============================================================
 
-def submit_transcription_request(speech_service, bucket, filename, phrases = None):
+def submit_transcription_request(speech_service, bucket, filename, phrases=None):
     '''
     Submits a job to the Google Cloud Speech API for asynchronous
     speech transcription.
@@ -325,13 +328,6 @@ def trim_silence(input_wav_filename, output_wav_filename):
 #  PROGRAM LOGIC
 # ============================================================
 
-# interpret timestamps on file objects:
-#
-# import iso8601
-# dt = iso8601.parse_date(rs['files'][2]['modifiedTime'])
-# import pytz
-# datetime.datetime.now(tz=pytz.utc) > dt
-
 class LoopAction(object):
     '''An action which runs in the polling loop.'''
 
@@ -350,14 +346,27 @@ class LoopAction(object):
         pass
 
     def should_tick(self):
+        '''
+        Predicate function to see if this poll loop action should run now.
+        '''
         return self.next_tick_time < time.time()
 
     def set_next_tick(self, wait_time_secs):
+        '''
+        Set the next tick time to be `wait_time_secs` in the future.
+        '''
         self.next_tick_time = time.time() + wait_time_secs
 
     def identity(self, job_id):
         '''Identity predicate: returns True if this job identifies as `job_id`.'''
         return False
+
+# interpret timestamps on file objects:
+#
+# import iso8601
+# dt = iso8601.parse_date(rs['files'][2]['modifiedTime'])
+# import pytz
+# datetime.datetime.now(tz=pytz.utc) > dt
 
 class DriveMonitorAction(LoopAction):
     '''Monitor the Google Drive folder and create new jobs.'''
@@ -404,22 +413,10 @@ class DriveMonitorAction(LoopAction):
         if num_created:
             logger.info('Drive Monitor created %d new jobs', num_created)
         # done
-        return num_created > 0
+        return False
 
 class TranscriptionJobAction(LoopAction):
     '''Monitor the Google Drive folder and create new jobs.'''
-
-    STATES = [
-        ('uploaded', TranscriptionJobAction.download),
-        ('downloaded', TranscriptionJobAction.transcode_to_wav),
-        ('wav', TranscriptionJobAction.trim_wav),
-        ('trimmed', TranscriptionJobAction.upload_to_cloud),
-        ('stored', TranscriptionJobAction.submit_to_speech_api),
-        ('submitted', TranscriptionJobAction.poll_speech_api),
-        ('transcribed', TranscriptionJobAction.clean_cloud),
-        ('cleaned', TranscriptionJobAction.destruct),
-        ('done', None),
-    ]
 
     def __init__(self, pstorage, services, poll_loop, job_name):
         '''Constructor.'''
@@ -440,7 +437,7 @@ class TranscriptionJobAction(LoopAction):
                 self.initialised = False
                 return
             self.job_record = {
-                'cloud_id': 'unknown',
+                'storage_id': 'unknown',
                 'state': 'uploaded',
                 'drive_id': ids[0],
             }
@@ -459,20 +456,26 @@ class TranscriptionJobAction(LoopAction):
         if not self.should_tick():
             return False
         current_state = self.job_record['state']
-        state_idx = [i for i, (x, y) in enumerate(TranscriptionJobAction.STATES)
+        state_idx = [i for i, (x, _y) in enumerate(TRANSCRIPTION_JOB_STATES)
                      if x == current_state]
         if not state_idx:
             logger.error('Cannot interpret TranscriptionJob state %s', current_state)
             return False
         state_idx = state_idx[0]
-        state_action = TranscriptionJobAction.STATES[state_idx][1]
-        if state_idx < len(TranscriptionJobAction.STATES) - 1:
-            next_state = TranscriptionJobAction.STATES[state_idx + 1][0]
+        state_action = TRANSCRIPTION_JOB_STATES[state_idx][1]
+        if state_idx < len(TRANSCRIPTION_JOB_STATES) - 1:
+            next_state = TRANSCRIPTION_JOB_STATES[state_idx + 1][0]
         else:
             next_state = current_state
-        return state_action(self, next_state)
+        if state_action is not None:
+            return state_action(self, next_state)
+        else:
+            return False
 
     def download(self, next_state):
+        '''
+        State machine action to download the AMR file for this job.
+        '''
         logger.info('Downloading %s', str(self))
         drive_download_file(self.services['drive'],
                             self.job_record['drive_id'],
@@ -484,6 +487,9 @@ class TranscriptionJobAction(LoopAction):
         return True
 
     def transcode_to_wav(self, next_state):
+        '''
+        State machine action to convert an AMR file to a WAV file.
+        '''
         logger.info('Transcoding to wav %s', str(self))
         convert_amr_to_wav(local_amr_path(self.job_name), local_wav_path(self.job_name))
         # TODO: check that operation succeeded
@@ -492,6 +498,9 @@ class TranscriptionJobAction(LoopAction):
         return True
 
     def trim_wav(self, next_state):
+        '''
+        State machine action to trim silence from a WAV file.
+        '''
         logger.info('Trimming wav %s', str(self))
         trim_silence(local_wav_path(self.job_name), local_trimmed_wav_path(self.job_name))
         # TODO: check that operation succeeded
@@ -500,9 +509,12 @@ class TranscriptionJobAction(LoopAction):
         return True
 
     def upload_to_cloud(self, next_state):
+        '''
+        State machine action to upload a WAV file to Google Cloud Storage.
+        '''
         logger.info('Uploading to cloud storage %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
-        response = cloud_upload_object(self.services['cloud'], BUCKET, filename = filename)
+        response = storage_upload_object(self.services['storage'], BUCKET, filename = filename)
         time.sleep(0.5)
         if response:
             if os.stat(filename).st_size == int(response['size']):
@@ -513,6 +525,10 @@ class TranscriptionJobAction(LoopAction):
         return False
 
     def submit_to_speech_api(self, next_state):
+        '''
+        State machine action to submit a speech recognition request to the
+        Google Cloud Speech API.
+        '''
         logger.info('Submitting to speech API %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
         phrases = ["semantics"," representation", "representational", "denotation",
@@ -522,14 +538,18 @@ class TranscriptionJobAction(LoopAction):
         time.sleep(0.5)
         self.set_next_tick(15)
         if response is not None and 'name' in response:
-            self.job_record['cloud_id'] = response['name']
+            self.job_record['storage_id'] = response['name']
             self.job_record['state'] = next_state
             self.pstorage.save()
             return False
         return False
 
     def poll_speech_api(self, next_state):
-        response = poll_transcription_results(self.services['speech'], self.job_record['cloud_id'])
+        '''
+        State machine action to check to see if the Google Cloud Speech
+        API has finished transcribing this job.
+        '''
+        response = poll_transcription_results(self.services['speech'], self.job_record['storage_id'])
         time.sleep(0.5)
         if 'done' in response and response['done']:
             logger.info('Speech API finished %s', str(self))
@@ -543,9 +563,12 @@ class TranscriptionJobAction(LoopAction):
         return False
 
     def clean_cloud(self, next_state):
+        '''
+        State machine action to delete a WAV file from the Google Cloud Storage.
+        '''
         logger.info('Deleting from cloud %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
-        response = cloud_delete_object(self.services['cloud'], BUCKET, filename)
+        _response = storage_delete_object(self.services['storage'], BUCKET, filename)
         time.sleep(0.5)
         # response seems to be always empty
         self.job_record['state'] = next_state
@@ -553,6 +576,10 @@ class TranscriptionJobAction(LoopAction):
         return True
 
     def destruct(self, next_state):
+        '''
+        State machine action to clean up this job and remove it from the
+        poll loop.
+        '''
         # empty, skip to done
         self.job_record['state'] = next_state
         self.pstorage.save()
@@ -564,16 +591,39 @@ class TranscriptionJobAction(LoopAction):
         self.set_next_tick(30)
         return False
 
+# Structure to document the order of states in a
+# TranscriptionJobAction, and indicate the transition actions between
+# them
+TRANSCRIPTION_JOB_STATES = [
+    ('uploaded', TranscriptionJobAction.download),
+    ('downloaded', TranscriptionJobAction.transcode_to_wav),
+    ('wav', TranscriptionJobAction.trim_wav),
+    ('trimmed', TranscriptionJobAction.upload_to_cloud),
+    ('stored', TranscriptionJobAction.submit_to_speech_api),
+    ('submitted', TranscriptionJobAction.poll_speech_api),
+    ('transcribed', TranscriptionJobAction.clean_cloud),
+    ('cleaned', TranscriptionJobAction.destruct),
+    ('done', None),
+]
+
+# The name of the folder on the user's Google Drive which will be
+# monitored for AMR files.
 FOLDER_NAME = 'Exams'
+
+# The name of the bucket on the Google Cloud Storage where WAV files
+# are stored during transcription.
 BUCKET = 'semantics-exam-marking.appspot.com'
 
 def main():
+    '''
+    Main function.
+    '''
     # load the persistent storage object
     pstorage = PersistentDict('pstorage.json')
 
     # create services
     services = {'drive': get_drive_service(),
-                'storage': get_cloud_storage_service(),
+                'storage': get_storage_service(),
                 'speech': get_speech_service()}
 
     # construct the polling loop:
