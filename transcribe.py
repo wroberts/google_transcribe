@@ -105,7 +105,8 @@ def get_service_acct_http():
     '''
     # Application default credentials provided by env variable
     # GOOGLE_APPLICATION_CREDENTIALS
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = get_credentials_path('semantics-exam-marking.json')
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = get_credentials_path(
+        'semantics-exam-marking.json')
     credentials = client.GoogleCredentials.get_application_default().create_scoped(
         ['https://www.googleapis.com/auth/cloud-platform'])
     http = httplib2.Http()
@@ -605,7 +606,8 @@ class TranscriptionJobAction(LoopAction):
         State machine action to check to see if the Google Cloud Speech
         API has finished transcribing this job.
         '''
-        response = poll_transcription_results(self.services['speech'], self.job_record['storage_id'])
+        response = poll_transcription_results(self.services['speech'],
+                                              self.job_record['storage_id'])
         time.sleep(0.5)
         if 'done' in response and response['done']:
             logger.info('Speech API finished %s', str(self))
