@@ -162,10 +162,11 @@ def drive_list_most_recent_files(drive_service, folder_id):
     - `drive_service`:
     - `folder_id`:
     '''
+    # https://developers.google.com/drive/v3/web/search-parameters
     results = drive_service.files().list(
         pageSize=100,
         orderBy='modifiedTime desc',
-        q="'{}' in parents".format(folder_id),
+        q="'{}' in parents and mimeType contains 'audio/'".format(folder_id),
         spaces='drive',
         corpus='user',
         fields="nextPageToken, files(id, mimeType, modifiedTime, name)").execute()
