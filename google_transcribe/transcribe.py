@@ -31,6 +31,7 @@ import os
 import subprocess
 import sys
 import time
+import click
 from apiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from appdirs import AppDirs
 from .datastore import PersistentDict
@@ -720,9 +721,14 @@ TRANSCRIPTION_JOB_STATES = [
     ('done', None),
 ]
 
+@click.command()
 def main():
     '''
-    Main function.
+    Google Speech Transcription Service.
+
+    This program is constructed like a daemon; it runs in a loop,
+    checking the user's Google Drive folder, and transcribing any
+    audio files which appear there.
     '''
     # load the persistent storage object
     mkdir_p(APP_CONFIG_DIR)

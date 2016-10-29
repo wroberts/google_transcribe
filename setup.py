@@ -21,7 +21,7 @@ with open(path.join(HERE, 'google_transcribe', 'VERSION'), encoding='utf-8') as 
 with open(path.join(HERE, 'README.rst'), encoding='utf-8') as f:
     LONG_DESCRIPTION = f.read()
 
-INSTALL_REQUIRES = ['appdirs', 'google-api-python-client']
+INSTALL_REQUIRES = ['appdirs', 'google-api-python-client', 'click']
 
 setup(
     name='google_transcribe',
