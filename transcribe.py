@@ -25,6 +25,7 @@ Speech API.
 
 import errno
 import logging
+import mimetypes
 import os
 import subprocess
 import sys
@@ -195,7 +196,7 @@ def drive_download_file(drive_service, file_id, output_filename, verbose = False
 # http://stackoverflow.com/q/20922944/1062499
 # https://developers.google.com/drive/v3/web/manage-uploads
 # https://developers.google.com/drive/v3/reference/files/create
-def drive_upload_file(drive_service, input_filename, mimetype, parent_folder_ids):
+def drive_upload_file(drive_service, input_filename, parent_folder_ids, mimetype=None):
     '''
     Uploads a file from the local disk (stored at `input_filename`) to
     the user's Google Drive, placing it in the directories indicated
@@ -204,15 +205,18 @@ def drive_upload_file(drive_service, input_filename, mimetype, parent_folder_ids
     Arguments:
     - `drive_service`:
     - `input_filename`:
-    - `mimetype`:
     - `parent_folder_ids`: a list of Google Drive folder IDs, where
       the file will be stored
+    - `mimetype`:
     '''
+    if mimetype is None:
+        mimetype, _enc = mimetypes.guess_type(input_filename)
     body = {
         'name': os.path.basename(input_filename),
-        'mimeType': mimetype,
         'parents': parent_folder_ids,
     }
+    if mimetype is not None:
+        body['mimeType'] = mimetype
 
     with open(input_filename, 'rb') as input_file:
         req = drive_service.files().create(
@@ -659,8 +663,9 @@ class TranscriptionJobAction(LoopAction):
         '''
         logger.info('Uploading transcription to google drive %s', str(self))
         filename = local_transcription_path(self.job_name)
-        response = drive_upload_file(self.services['drive'], filename, 'text/plain',
-                                     self.job_record['drive_parents'])
+        response = drive_upload_file(self.services['drive'], filename,
+                                     self.job_record['drive_parents'],
+                                     'text/plain')
         time.sleep(0.5)
         if 'id' in response:
             self.job_record['state'] = next_state
