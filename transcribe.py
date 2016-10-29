@@ -23,12 +23,14 @@ Server process to manage speech transcription using the Google Cloud
 Speech API.
 '''
 
+import errno
 import logging
 import os
 import subprocess
 import sys
 import time
 from apiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from appdirs import AppDirs
 from datastore import PersistentDict
 from googleapiclient import discovery
 from oauth2client import client
@@ -42,18 +44,52 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
+#  CONFIGURATION
+# ============================================================
+
+# The name of the folder on the user's Google Drive which will be
+# monitored for AMR files.
+FOLDER_NAME = 'Exams'
+
+# The name of the bucket on the Google Cloud Storage where WAV files
+# are stored during transcription.
+BUCKET = 'semantics-exam-marking.appspot.com'
+
+# The name of the user agent to represent this app to Google Drive
+USER_AGENT_NAME = 'Samarkand'
+
+# ============================================================
 #  AUTHORISATION
 # ============================================================
+
+APPLICATION_DIRS = AppDirs('google-transcribe', 'wkr', version='1.0')
+APP_CONFIG_DIR = APPLICATION_DIRS.user_config_dir
+APP_CACHE_DIR = APPLICATION_DIRS.user_cache_dir
+
+def get_credentials_path(filename):
+    '''
+    Gets the full path to a file stored in the credentials
+    subdirectory of this application's configuration directory.
+    '''
+    path = os.path.join(APP_CONFIG_DIR, 'credentials')
+    if not os.path.exists(path):
+        logger.fatal('Could not find credentials directory')
+        raise Exception('Could not find credentials directory')
+    path = os.path.join(path, filename)
+    if not os.path.exists(path):
+        logger.fatal('Could not find credentials file %s', filename)
+        raise Exception('Could not find credentials file {}'.format(filename))
+    return path
 
 def get_drive_service():
     '''
     Returns an object used to interact with the Google Drive API.
     '''
     flow = client.flow_from_clientsecrets(
-        'credentials/samarkand_secret.json',
+        get_credentials_path('secret.json'),
         'https://www.googleapis.com/auth/drive.readonly')
-    flow.user_agent = 'Samarkand'
-    store = Storage('credentials/storage.dat')
+    flow.user_agent = USER_AGENT_NAME
+    store = Storage(get_credentials_path('storage.dat'))
     credentials = store.get()
     if not credentials or credentials.invalid:
         flags = tools.argparser.parse_args(args=[])
@@ -69,7 +105,7 @@ def get_service_acct_http():
     '''
     # Application default credentials provided by env variable
     # GOOGLE_APPLICATION_CREDENTIALS
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'credentials/semantics-exam-marking.json'
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = get_credentials_path('semantics-exam-marking.json')
     credentials = client.GoogleCredentials.get_application_default().create_scoped(
         ['https://www.googleapis.com/auth/cloud-platform'])
     http = httplib2.Http()
@@ -257,6 +293,18 @@ def poll_transcription_results(speech_service, name):
 #  LOCAL FILE MANAGEMENT AND SUBPROCESSING
 # ============================================================
 
+def mkdir_p(path):
+    '''
+    Functionality similar to mkdir -p.
+    '''
+    try:
+        os.makedirs(path)
+    except OSError as exc: # Python >2.5
+        if exc.errno == errno.EEXIST and os.path.isdir(path):
+            pass
+        else:
+            raise
+
 def local_amr_path(filename):
     '''
     Returns the path on the local drive where AMR files are downloaded to.
@@ -264,7 +312,9 @@ def local_amr_path(filename):
     Arguments:
     - `filename`: the basename of an AMR file
     '''
-    return os.path.join('amr_files', os.path.basename(filename))
+    path = os.path.join(APP_CACHE_DIR, 'amr_files')
+    mkdir_p(path)
+    return os.path.join(path, os.path.basename(filename))
 
 def local_wav_path(filename):
     '''
@@ -273,7 +323,9 @@ def local_wav_path(filename):
     Arguments:
     - `filename`: the basename of an AMR file
     '''
-    return os.path.join('wav_files',
+    path = os.path.join(APP_CACHE_DIR, 'wav_files')
+    mkdir_p(path)
+    return os.path.join(path,
                         os.path.basename(filename).replace('.amr', '.wav'))
 
 def local_trimmed_wav_path(filename):
@@ -283,7 +335,9 @@ def local_trimmed_wav_path(filename):
     Arguments:
     - `filename`: the basename of an AMR file
     '''
-    return os.path.join('trimmed_wav_files',
+    path = os.path.join(APP_CACHE_DIR, 'trimmed_wav_files')
+    mkdir_p(path)
+    return os.path.join(path,
                         os.path.basename(filename).replace('.amr', '.wav'))
 
 def local_transcription_path(filename):
@@ -293,7 +347,9 @@ def local_transcription_path(filename):
     Arguments:
     - `filename`: the basename of an AMR file
     '''
-    return os.path.join('transcriptions',
+    path = os.path.join(APP_CACHE_DIR, 'transcriptions')
+    mkdir_p(path)
+    return os.path.join(path,
                         os.path.basename(filename).replace('.amr', '.txt'))
 
 FFMPEG = subprocess.check_output(['which', 'ffmpeg']).strip()
@@ -605,14 +661,6 @@ TRANSCRIPTION_JOB_STATES = [
     ('cleaned', TranscriptionJobAction.destruct),
     ('done', None),
 ]
-
-# The name of the folder on the user's Google Drive which will be
-# monitored for AMR files.
-FOLDER_NAME = 'Exams'
-
-# The name of the bucket on the Google Cloud Storage where WAV files
-# are stored during transcription.
-BUCKET = 'semantics-exam-marking.appspot.com'
 
 def main():
     '''
