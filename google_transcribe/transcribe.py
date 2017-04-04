@@ -28,6 +28,7 @@ import errno
 import logging
 import mimetypes
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -491,7 +492,10 @@ class DriveMonitorAction(LoopAction):
                 self.folder_name))
         # refresh the list of files in the google drive
         logger.info('Checking Google Drive ...')
-        results = drive_list_most_recent_files(self.services['drive'], self.folder_id)
+        try:
+            results = drive_list_most_recent_files(self.services['drive'], self.folder_id)
+        except socket.error:
+            results = {}
         if 'files' not in results:
             return False
         # update the persistent storage
