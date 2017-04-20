@@ -495,6 +495,7 @@ class DriveMonitorAction(LoopAction):
         try:
             results = drive_list_most_recent_files(self.services['drive'], self.folder_id)
         except socket.error:
+            logger.warning('socket.error')
             results = {}
         if 'files' not in results:
             return False
@@ -617,7 +618,11 @@ class TranscriptionJobAction(LoopAction):
         '''
         logger.info('Uploading to cloud storage %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
-        response = storage_upload_object(self.services['storage'], BUCKET, filename = filename)
+        try:
+            response = storage_upload_object(self.services['storage'], BUCKET, filename = filename)
+        except socket.error:
+            logger.warning('socket.error')
+            response = None
         time.sleep(0.5)
         if response:
             if os.stat(filename).st_size == int(response['size']):
