@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 # The name of the folder on the user's Google Drive which will be
-# monitored for AMR files.
+# monitored for audio recording files.
 FOLDER_NAME = 'Exams'
 
 # The name of the bucket on the Google Cloud Storage where WAV files
@@ -131,7 +131,7 @@ def get_speech_service():
     API.
     '''
     http = get_service_acct_http()
-    service = discovery.build('speech', 'v1beta1', http=http)
+    service = discovery.build('speech', 'v1', http=http)
     return service
 
 # ============================================================
@@ -302,7 +302,7 @@ def submit_transcription_request(speech_service, bucket, filename, phrases=None)
             # There are a bunch of config options you can specify. See
             # https://goo.gl/KPZn97 for the full list.
             'encoding': 'LINEAR16',  # raw 16-bit signed LE samples
-            'sampleRate': 16000,  # 16 khz
+            'sampleRateHertz': 16000,  # 16 khz
             # See https://goo.gl/A9KJ1A for a list of supported languages.
             'languageCode': 'en-US',  # a BCP-47 language tag
         },
@@ -311,9 +311,9 @@ def submit_transcription_request(speech_service, bucket, filename, phrases=None)
         }
     }
     if phrases is not None:
-        body['config']['speech_context'] = {}
-        body['config']['speech_context']['phrases'] = phrases
-    service_request = speech_service.speech().asyncrecognize(body=body)
+        body['config']['speech_contexts'] = {}
+        body['config']['speech_contexts']['phrases'] = phrases
+    service_request = speech_service.speech().longrunningrecognize(body=body)
     response = service_request.execute()
     return response
 
@@ -346,12 +346,14 @@ def mkdir_p(path):
         else:
             raise
 
-def local_amr_path(filename):
+def local_input_file_path(filename):
     '''
-    Returns the path on the local drive where AMR files are downloaded to.
+    Returns the path on the local drive where audio recording files
+    are downloaded to.
 
     Arguments:
-    - `filename`: the basename of an AMR file
+    - `filename`: the filename of an audio recording file; this file
+      may be in a variety of formats (e.g., AMR, WAV, M4A, etc.)
     '''
     path = os.path.join(APP_CACHE_DIR, 'amr_files')
     mkdir_p(path)
@@ -362,47 +364,53 @@ def local_wav_path(filename):
     Returns the path on the local drive where WAV files are stored.
 
     Arguments:
-    - `filename`: the basename of an AMR file
+    - `filename`: the filename of the audio recording file
     '''
     path = os.path.join(APP_CACHE_DIR, 'wav_files')
     mkdir_p(path)
     return os.path.join(path,
-                        os.path.basename(filename).replace('.amr', '.wav'))
+                        os.path.splitext(os.path.basename(filename))[0] + '.wav')
 
 def local_trimmed_wav_path(filename):
     '''
-    Returns the path on the local drive where trimmed WAV files are stored.
+    Returns the path on the local drive where trimmed WAV files are
+    stored.
 
     Arguments:
-    - `filename`: the basename of an AMR file
+    - `filename`: the filename of the audio recording file
     '''
     path = os.path.join(APP_CACHE_DIR, 'trimmed_wav_files')
     mkdir_p(path)
     return os.path.join(path,
-                        os.path.basename(filename).replace('.amr', '.wav'))
+                        os.path.splitext(os.path.basename(filename))[0] + '.wav')
 
 def local_transcription_path(filename):
     '''
-    Returns the path on the local drive where transcribed TXT files are stored.
+    Returns the path on the local drive where transcribed TXT files
+    are stored.
 
     Arguments:
-    - `filename`: the basename of an AMR file
+    - `filename`: the filename of the audio recording file
     '''
     path = os.path.join(APP_CACHE_DIR, 'transcriptions')
     mkdir_p(path)
     return os.path.join(path,
-                        os.path.basename(filename).replace('.amr', '.txt'))
+                        os.path.splitext(os.path.basename(filename))[0] + '.txt')
 
 FFMPEG = subprocess.check_output(['which', 'ffmpeg']).strip()
-def convert_amr_to_wav(amr_filename, wav_filename):
+def convert_input_to_wav(input_filename, wav_filename):
     '''
-    Converts an AMR file into a WAV file using ffmpeg.
+    Converts an audio recording file into a WAV file using ffmpeg.
+    The original audio recording file may be in a variety of formats
+    (e.g., AMR, WAV, M4A, etc.).  Ffmpeg is used to convert between
+    these possible input formats and PCM16 WAV files, which are used
+    by this program internally.
 
     Arguments:
-    - `amr_filename`:
+    - `input_filename`:
     - `wav_filename`:
     '''
-    subprocess.call([FFMPEG, '-i', amr_filename, wav_filename])
+    subprocess.call([FFMPEG, '-i', input_filename, wav_filename])
 
 SOX = subprocess.check_output(['which', 'sox']).strip()
 def trim_silence(input_wav_filename, output_wav_filename):
@@ -578,12 +586,13 @@ class TranscriptionJobAction(LoopAction):
 
     def download(self, next_state):
         '''
-        State machine action to download the AMR file for this job.
+        State machine action to download the original audio recording file
+        for this job.
         '''
         logger.info('Downloading %s', str(self))
         drive_download_file(self.services['drive'],
                             self.job_record['drive_id'],
-                            local_amr_path(self.job_name), True)
+                            local_input_file_path(self.job_name), True)
         time.sleep(0.5)
         # TODO: check that operation succeeded
         self.job_record['state'] = next_state
@@ -592,10 +601,15 @@ class TranscriptionJobAction(LoopAction):
 
     def transcode_to_wav(self, next_state):
         '''
-        State machine action to convert an AMR file to a WAV file.
+        State machine action to convert an original audio recording file
+        to a WAV file.  Audio recordings may be input to this program
+        in a variety of audio formats (e.g., AMR, WAV).  This step
+        ensures that they are in WAV format for future processing
+        steps.
         '''
         logger.info('Transcoding to wav %s', str(self))
-        convert_amr_to_wav(local_amr_path(self.job_name), local_wav_path(self.job_name))
+        convert_input_to_wav(local_input_file_path(self.job_name),
+                             local_wav_path(self.job_name))
         # TODO: check that operation succeeded
         self.job_record['state'] = next_state
         self.pstorage.save()
