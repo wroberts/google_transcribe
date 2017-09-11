@@ -655,9 +655,13 @@ class TranscriptionJobAction(LoopAction):
         filename = local_trimmed_wav_path(self.job_name)
         phrases = ["semantics"," representation", "representational", "denotation",
                    "denotational", "reference", "referential"]
-        response = submit_transcription_request(self.services['speech'], BUCKET,
-                                                filename, phrases = phrases)
-        time.sleep(0.5)
+        try:
+            response = submit_transcription_request(self.services['speech'], BUCKET,
+                                                    filename, phrases = phrases)
+            time.sleep(0.5)
+        except socket.error:
+            logger.warning('socket.error')
+            response = None
         self.set_next_tick(15)
         if response is not None and 'name' in response:
             self.job_record['storage_id'] = response['name']
@@ -671,9 +675,13 @@ class TranscriptionJobAction(LoopAction):
         State machine action to check to see if the Google Cloud Speech
         API has finished transcribing this job.
         '''
-        response = poll_transcription_results(self.services['speech'],
-                                              self.job_record['storage_id'])
-        time.sleep(0.5)
+        try:
+            response = poll_transcription_results(self.services['speech'],
+                                                  self.job_record['storage_id'])
+            time.sleep(0.5)
+        except socket.error:
+            logger.warning('socket.error')
+            response = {}
         if 'done' in response and response['done']:
             logger.info('Speech API finished %s', str(self))
             with open(local_transcription_path(self.job_name), 'w') as output_file:
@@ -692,10 +700,14 @@ class TranscriptionJobAction(LoopAction):
         '''
         logger.info('Uploading transcription to google drive %s', str(self))
         filename = local_transcription_path(self.job_name)
-        response = drive_upload_file(self.services['drive'], filename,
-                                     self.job_record['drive_parents'],
-                                     'text/plain')
-        time.sleep(0.5)
+        try:
+            response = drive_upload_file(self.services['drive'], filename,
+                                         self.job_record['drive_parents'],
+                                         'text/plain')
+            time.sleep(0.5)
+        except socket.error:
+            logger.warning('socket.error')
+            response = {}
         if 'id' in response:
             self.job_record['state'] = next_state
             self.pstorage.save()
@@ -709,7 +721,11 @@ class TranscriptionJobAction(LoopAction):
         '''
         logger.info('Deleting from cloud %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
-        _response = storage_delete_object(self.services['storage'], BUCKET, filename)
+        try:
+            _response = storage_delete_object(self.services['storage'], BUCKET, filename)
+        except socket.error:
+            logger.warning('socket.error')
+            return True
         time.sleep(0.5)
         # response seems to be always empty
         self.job_record['state'] = next_state
