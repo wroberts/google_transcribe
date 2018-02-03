@@ -24,6 +24,7 @@ Speech API.
 '''
 
 from __future__ import absolute_import, unicode_literals
+
 import errno
 import logging
 import mimetypes
@@ -32,15 +33,16 @@ import socket
 import subprocess
 import sys
 import time
+
 import click
-from apiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
-from appdirs import AppDirs
-from .datastore import PersistentDict
-from googleapiclient import discovery
-from oauth2client import client
-from oauth2client import tools
-from oauth2client.file import Storage
 import httplib2
+from appdirs import AppDirs
+from googleapiclient import discovery
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from oauth2client import client, tools
+from oauth2client.file import Storage
+
+from .datastore import PersistentDict
 
 logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s',
                     stream=sys.stderr, level=logging.DEBUG)
@@ -179,7 +181,7 @@ def drive_list_most_recent_files(drive_service, folder_id):
 # https://developers.google.com/drive/v3/web/about-sdk
 # https://developers.google.com/drive/v3/web/manage-downloads
 # https://developers.google.com/drive/v3/web/about-auth
-def drive_download_file(drive_service, file_id, output_filename, verbose = False):
+def drive_download_file(drive_service, file_id, output_filename, verbose=False):
     '''
     Downloads the file with the given file ID on the user's Google
     Drive to the local file with the path `output_filename`.
@@ -190,7 +192,7 @@ def drive_download_file(drive_service, file_id, output_filename, verbose = False
     - `output_filename`:
     - `verbose`:
     '''
-    request = drive_service.files().get_media(fileId = file_id)
+    request = drive_service.files().get_media(fileId=file_id)
     with open(output_filename, 'wb') as output_file:
         downloader = MediaIoBaseDownload(output_file, request)
         done = False
@@ -581,8 +583,7 @@ class TranscriptionJobAction(LoopAction):
             next_state = current_state
         if state_action is not None:
             return state_action(self, next_state)
-        else:
-            return False
+        return False
 
     def download(self, next_state):
         '''
@@ -633,7 +634,7 @@ class TranscriptionJobAction(LoopAction):
         logger.info('Uploading to cloud storage %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
         try:
-            response = storage_upload_object(self.services['storage'], BUCKET, filename = filename)
+            response = storage_upload_object(self.services['storage'], BUCKET, filename=filename)
         except socket.error:
             logger.warning('socket.error')
             response = None
@@ -653,11 +654,12 @@ class TranscriptionJobAction(LoopAction):
         '''
         logger.info('Submitting to speech API %s', str(self))
         filename = local_trimmed_wav_path(self.job_name)
-        phrases = ["semantics"," representation", "representational", "denotation",
+        phrases = ["semantics", "representation", "representational",
+                   "denotation",
                    "denotational", "reference", "referential"]
         try:
             response = submit_transcription_request(self.services['speech'], BUCKET,
-                                                    filename, phrases = phrases)
+                                                    filename, phrases=phrases)
             time.sleep(0.5)
         except socket.error:
             logger.warning('socket.error')
