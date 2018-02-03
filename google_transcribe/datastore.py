@@ -12,6 +12,7 @@ JSON-formatted file.
 from __future__ import absolute_import, unicode_literals
 import json
 
+
 def store_data(json_filename, data):
     '''
     Writes the Python structure in `data` into a JSON file with path
@@ -22,8 +23,10 @@ def store_data(json_filename, data):
     - `data`:
     '''
     with open(json_filename, 'wb') as output_file:
-        json_data = json.dumps(data, sort_keys=True, indent=4, ensure_ascii=False)
+        json_data = json.dumps(data, sort_keys=True, indent=4,
+                               ensure_ascii=False)
         output_file.write(json_data.encode('utf-8'))
+
 
 def load_data(json_filename):
     '''
@@ -35,6 +38,7 @@ def load_data(json_filename):
     '''
     with open(json_filename, 'rb') as input_file:
         return json.loads(input_file.read().decode('utf-8'))
+
 
 class PersistentDict(dict):
     '''
@@ -64,4 +68,5 @@ class PersistentDict(dict):
         store_data(self._filename, self)
 
     def save(self):
+        """Save this store to file."""
         store_data(self._filename, self)
