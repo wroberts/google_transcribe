@@ -852,6 +852,8 @@ def main():
     # google drive monitor
     poll_loop.append(DriveMonitorAction(pstorage, services, poll_loop,
                                         FOLDER_NAME))
+    if 'jobs' not in pstorage:
+        pstorage['jobs'] = {}
     # any (unfinished) jobs
     poll_loop.extend([TranscriptionJobAction(pstorage, services, poll_loop,
                                              job_name)
